@@ -96,14 +96,16 @@ void loop() {
     }
 
     // ===== MOTOR CONTROL =====
-    if (motorEnabled) {
-        output = constrain(output, -255.0f, 255.0f);
+ int pwm = 0;
 
-        int pwm = (int)output;
-        setMotor(pwm, pwm);
-    } else {
-        motorStop();
-    }
+if (motorEnabled) {
+    output = constrain(output, -255.0f, 255.0f);
+
+    pwm = compensateDeadzone(output);
+    setMotor(pwm, pwm);
+} else {
+    motorStop();
+}
 
     // ===== DEBUG (20 Hz) =====
     if (millis() - lastPrint >= 50) {
@@ -112,5 +114,6 @@ void loop() {
         Serial.printf(">Roll:%.2f\n", imu.roll);
         Serial.printf(">GyroRate:%.2f\n", imu.gyroRateX);
         Serial.printf(">PD_Output:%.2f\n", output);
+        Serial.printf(">PWM_Actual:%d\n", pwm);
     }
 }
