@@ -9,12 +9,12 @@ A two-wheeled self-balancing robot built with ESP32, MPU6050 IMU, DC motors, and
 
 ### Circuit Schematic
 
-[View Schematic (PDF)](hardware/exports/schematic.pdf)
+[View Schematic (PDF)](hardware/export/self-balancing.kidcad_sch)
 
 ### PCB Layout
 
-[Top Layer](hardware/exports/pcb_top.svg) |
-[Bottom Layer](hardware/exports/pcb_bottom.svg)
+[Top Layer](hardware/export/self-balancing-Front.svg) |
+[Bottom Layer](hardware/export/self-balancing-Back.svg)  
 
 ### KiCad Source Files
 
