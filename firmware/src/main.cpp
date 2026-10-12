@@ -1,104 +1,116 @@
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
 
-Adafruit_MPU6050 mpu;
+#include "config.h"
+#include "imu.h"
+#include "pid.h"
+#include "motor.h"
 
-float roll = 0.0f;
+// ===== CONTROL SETTINGS =====
+float targetRoll = 0.0f;
 
-// ===== COMPLEMENTARY FILTER =====
-const float alpha = 0.98f;
-const unsigned long sampleTime = 10000; // 10ms = 100Hz
+const float MAX_ANGLE = 30.0f;
+const float ARM_ANGLE = 5.0f;
 
 unsigned long lastTime = 0;
-bool firstAngle = true;
+unsigned long lastPrint = 0;
 
-// ===== GYRO OFFSET (rad/s) =====
-const float gyroOffsetX = -0.11984f;
-const float gyroOffsetY = -0.03613f;
-const float gyroOffsetZ = -0.00899f;
+bool motorEnabled = false;
 
-// ===== ACCEL CALIB =====
-const float accelOffset[3] = {
-  0.05343f, 0.23715f, 0.64743f
-};
-
-const float accelScale[3] = {
-  1.005877f, 0.998314f, 0.972981f
-};
-
-// CONSTANT FOR PID
-float targetRoll = 0.0f;
-float Kp = 1.0f;
-float Kd = 0.1f;
 void setup() {
-  Serial.begin(115200);
+    Serial.begin(115200);
 
-  Wire.begin(21, 22);
-  Wire.setClock(400000);
+    if (!imuInit()) {
+        Serial.println("MPU6050 ERROR!");
+        while (1) delay(100);
+    }
 
-  if (!mpu.begin(0x68, &Wire)) {
-    Serial.println("Khong tim thay MPU6050!");
-    while (1) delay(100);
-  }
+    motorInit();
+    motorStop();
 
-  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
-  mpu.setGyroRange(MPU6050_RANGE_250_DEG);
-  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    Serial.println("SYSTEM READY");
+    Serial.println("Gui S de bat PD khi xe gan thang.");
+    Serial.println("Gui X de dung motor.");
 
-  Serial.println("MPU6050 READY");
-
-  lastTime = micros();
+    lastTime = micros();
 }
 
 void loop() {
 
-  // ===== SAMPLE TIME =====
-  unsigned long now = micros();
+    // ===== SAMPLE TIME =====
+    unsigned long now = micros();
 
-  if ((unsigned long)(now - lastTime) < sampleTime) {
-    return;
-  }
+    if ((unsigned long)(now - lastTime) < SAMPLE_TIME_US) {
+        return;
+    }
 
-  float dt = (now - lastTime) * 1e-6f;
-  lastTime = now;
+    float dt = (now - lastTime) * 1e-6f;
+    lastTime = now;
 
-  // ===== READ MPU6050 =====
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
+    // ===== READ IMU =====
+    IMUData imu = imuUpdate(dt);
 
-  // ===== GYRO (deg/s) =====
-  float p = (g.gyro.x - gyroOffsetX) * RAD_TO_DEG;
-  float q = (g.gyro.y - gyroOffsetY) * RAD_TO_DEG;
-  float r = (g.gyro.z - gyroOffsetZ) * RAD_TO_DEG;
+    // ===== SAFETY CHECK =====
+    if (!isfinite(imu.roll) || !isfinite(imu.gyroRateX)
+        || dt > 0.05f) {
+        motorEnabled = false;
+    }
 
-  // ===== ACCEL (m/s2) =====
-  float ax = (a.acceleration.x - accelOffset[0]) * accelScale[0];
-  float ay = (a.acceleration.y - accelOffset[1]) * accelScale[1];
-  float az = (a.acceleration.z - accelOffset[2]) * accelScale[2];
+    if (fabsf(imu.roll - targetRoll) > MAX_ANGLE) {
+        motorEnabled = false;
+    }
 
-  // ===== ROLL FROM ACCEL =====
-  float roll_a = atan2(
-    ay, sqrt(ax * ax + az * az)
-  ) * RAD_TO_DEG;
+    // ===== SERIAL COMMAND =====
+    while (Serial.available()) {
+        char cmd = Serial.read();
 
-  // ===== INITIAL ANGLE =====
-  if (firstAngle) {
-    roll = roll_a;
-    firstAngle = false;
-  }
+        if (cmd == 'x' || cmd == 'X') {
+            motorEnabled = false;
+        }
 
-  // ===== ROLL FROM GYRO =====
-  float roll_g = roll + p * dt;
+        if (cmd == 's' || cmd == 'S') {
+            if (isfinite(imu.roll) &&
+                isfinite(imu.gyroRateX) &&
+                fabsf(imu.roll - targetRoll) < ARM_ANGLE &&
+                dt <= 0.05f) {
 
-  // ===== COMPLEMENTARY FILTER =====
-  roll = alpha * roll_g
-       + (1.0f - alpha) * roll_a;
+                motorEnabled = true;
+            }
+        }
+    }
 
-  // ===== TELEPLOT =====
-  Serial.printf(">Roll_Accel:%.2f\n", roll_a);
-  Serial.printf(">Roll_Gyro:%.2f\n", roll_g);
-  Serial.printf(">Roll_Filter:%.2f\n", roll);
+    // ===== PD CONTROLLER =====
+    float output = 0.0f;
+
+    if (motorEnabled) {
+        output = calculatePD(
+            targetRoll,
+            imu.roll,
+            imu.gyroRateX
+        );
+
+        if (!isfinite(output)) {
+            motorEnabled = false;
+            output = 0.0f;
+        }
+    }
+
+    // ===== MOTOR CONTROL =====
+    if (motorEnabled) {
+        output = constrain(output, -255.0f, 255.0f);
+
+        int pwm = (int)output;
+        setMotor(pwm, pwm);
+    } else {
+        motorStop();
+    }
+
+    // ===== DEBUG (20 Hz) =====
+    if (millis() - lastPrint >= 50) {
+        lastPrint = millis();
+
+        Serial.printf(">Roll:%.2f\n", imu.roll);
+        Serial.printf(">GyroRate:%.2f\n", imu.gyroRateX);
+        Serial.printf(">PD_Output:%.2f\n", output);
+    }
 }
