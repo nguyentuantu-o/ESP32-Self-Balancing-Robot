@@ -81,7 +81,7 @@ IMUData imuUpdate(float dt) {
     IMUData data;
     data.rollAccel = roll_a;
     data.rollGyro = roll_g;
-    data.roll = roll;
+    data.roll = roll +2.5f; // 2.5f is the offset to make the robot stand straight
     data.gyroRateX = p;
 
     return data;

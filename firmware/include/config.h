@@ -7,7 +7,7 @@
 #define MPU_ADDR 0x68
 
 // ===== CONTROL LOOP =====
-constexpr unsigned long SAMPLE_TIME_US = 10000; // 100 Hz
+constexpr unsigned long SAMPLE_TIME_US = 10000; // 100 Hz 
 constexpr float ALPHA = 0.98f;
 
 // ===== MOTOR TB6612FNG =====

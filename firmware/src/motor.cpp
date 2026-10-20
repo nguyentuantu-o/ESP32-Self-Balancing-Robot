@@ -83,32 +83,48 @@ void motorTest() {
     delay(2000);
 }
 
+
 int compensateDeadzone(float output) {
-    const int minPWM = 30;
+    // Bu PWM rieng cho tung chieu
+    const int minPWMForward = 30;
+    const int minPWMBackward = 30;
+
     const float threshold = 1.0f;
+
+    if (!isfinite(output)) {
+        return 0;
+    }
 
     float magnitude = fabsf(output);
 
-    // Neu output qua nho thi dung motor
+    // Output qua nho -> dung motor
     if (magnitude < threshold) {
         return 0;
     }
 
-    // Gioi han output PID
     magnitude = constrain(magnitude, 0.0f, 255.0f);
 
-    // Bu vung chet PWM
-    int pwm = minPWM + (int)(
-        (magnitude - threshold) * (255 - minPWM)
-        / (255 - threshold)
-    );
+    int minPWM;
 
-    pwm = constrain(pwm, 0, 255);
+    if (output > 0.0f) {
+        minPWM = minPWMForward;
+    } else {
+        minPWM = minPWMBackward;
+    }
 
-    // Giu nguyen chieu quay
-    if (output < 0) {
+    // Anh xa output sang PWM sau bu
+    float mappedPWM = minPWM
+        + (magnitude - threshold)
+        * (255.0f - minPWM)
+        / (255.0f - threshold);
+
+    int pwm = constrain((int)mappedPWM, 0, 255);
+
+    // Giu nguyen dau PWM
+    if (output < 0.0f) {
         pwm = -pwm;
     }
 
     return pwm;
 }
+

@@ -1,6 +1,6 @@
 
 #include <Arduino.h>
-
+#include "web_tune.h"
 #include "config.h"
 #include "imu.h"
 #include "pid.h"
@@ -16,6 +16,7 @@ unsigned long lastTime = 0;
 unsigned long lastPrint = 0;
 
 bool motorEnabled = false;
+bool autoArm = true;
 
 void setup() {
     Serial.begin(115200);
@@ -27,57 +28,64 @@ void setup() {
 
     motorInit();
     motorStop();
-
-    Serial.println("SYSTEM READY");
-    Serial.println("Gui S de bat PD khi xe gan thang.");
-    Serial.println("Gui X de dung motor.");
-
+    webTuneInit();
     lastTime = micros();
 }
 
 void loop() {
+    webTuneHandle();
 
     // ===== SAMPLE TIME =====
     unsigned long now = micros();
+    unsigned long elapsed = now - lastTime;
 
-    if ((unsigned long)(now - lastTime) < SAMPLE_TIME_US) {
+    if (elapsed < SAMPLE_TIME_US) {
         return;
     }
 
-    float dt = (now - lastTime) * 1e-6f;
-    lastTime = now;
+    float dt = elapsed * 1e-6f;
+    lastTime += (elapsed / SAMPLE_TIME_US) * SAMPLE_TIME_US;
 
     // ===== READ IMU =====
     IMUData imu = imuUpdate(dt);
 
     // ===== SAFETY CHECK =====
-    if (!isfinite(imu.roll) || !isfinite(imu.gyroRateX)
-        || dt > 0.05f) {
-        motorEnabled = false;
-    }
+    if (!isfinite(imu.roll) ||
+    !isfinite(imu.gyroRateX) ||
+    dt > 0.05f ||
+    fabsf(imu.roll - targetRoll) > MAX_ANGLE) {
 
-    if (fabsf(imu.roll - targetRoll) > MAX_ANGLE) {
-        motorEnabled = false;
-    }
+    motorEnabled = false;
+    autoArm = false;
+}
 
     // ===== SERIAL COMMAND =====
-    while (Serial.available()) {
-        char cmd = Serial.read();
+  while (Serial.available()) {
+    char cmd = Serial.read();
 
-        if (cmd == 'x' || cmd == 'X') {
-            motorEnabled = false;
-        }
-
-        if (cmd == 's' || cmd == 'S') {
-            if (isfinite(imu.roll) &&
-                isfinite(imu.gyroRateX) &&
-                fabsf(imu.roll - targetRoll) < ARM_ANGLE &&
-                dt <= 0.05f) {
-
-                motorEnabled = true;
-            }
-        }
+    if (cmd == 'x' || cmd == 'X') {
+        motorEnabled = false;
+        autoArm = false;
+        motorStop();
     }
+
+    if (cmd == 's' || cmd == 'S') {
+        autoArm = true;
+    }
+}
+    // Tu dong bat PD sau khi reset ESP32
+if (autoArm && !motorEnabled) {
+    if (isfinite(imu.roll) &&
+        isfinite(imu.gyroRateX) &&
+        dt <= 0.05f &&
+        fabsf(imu.roll - targetRoll) < ARM_ANGLE) {
+
+        motorEnabled = true;
+        autoArm = false;
+
+        Serial.println("PD AUTO ENABLED");
+    }
+}
 
     // ===== PD CONTROLLER =====
     float output = 0.0f;
@@ -106,14 +114,4 @@ if (motorEnabled) {
 } else {
     motorStop();
 }
-
-    // ===== DEBUG (20 Hz) =====
-    if (millis() - lastPrint >= 50) {
-        lastPrint = millis();
-
-        Serial.printf(">Roll:%.2f\n", imu.roll);
-        Serial.printf(">GyroRate:%.2f\n", imu.gyroRateX);
-        Serial.printf(">PD_Output:%.2f\n", output);
-        Serial.printf(">PWM_Actual:%d\n", pwm);
-    }
 }
